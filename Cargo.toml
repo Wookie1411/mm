@@ -2,7 +2,7 @@
 name = "dev_emrekmek_modmanager"
 description = "Browse, install, update, downgrade, enable/disable and remove Minecraft mods and plugins from Modrinth and CurseForge."
 authors = ["UndercoverNL"]
-version = "1.13.0"
+version = "1.13.1"
 edition = { workspace = true }
 
 [dependencies]

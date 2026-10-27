@@ -412,6 +412,10 @@ pub struct PackRequest {
     /// Install the pack's server pack instead, when the provider has one (CurseForge).
     #[serde(default = "yes")]
     server_pack: bool,
+    /// Write eula.txt with eula=true, so the first start does not stop at Mojang's EULA.
+    /// Off unless the install dialog's checkbox sends it.
+    #[serde(default)]
+    accept_eula: bool,
 }
 
 fn yes() -> bool {
@@ -604,7 +608,13 @@ pub async fn install(
         )
         .await;
 
-    let options = RunOptions { clean: data.clean, switch_version: data.switch_version, wipe: data.wipe, server_pack: data.server_pack };
+    let options = RunOptions {
+        clean: data.clean,
+        switch_version: data.switch_version,
+        wipe: data.wipe,
+        server_pack: data.server_pack,
+        accept_eula: data.accept_eula,
+    };
     tokio::spawn(async move {
         let job = Arc::new(Mutex::new(job));
         if let Err(e) = run(&ctx, &version, &title, options, job.clone()).await {
@@ -674,10 +684,11 @@ struct RunOptions {
     switch_version: bool,
     wipe: bool,
     server_pack: bool,
+    accept_eula: bool,
 }
 
 async fn run(ctx: &Ctx, version: &Version, title: &str, options: RunOptions, job: Arc<Mutex<Job>>) -> Result<(), anyhow::Error> {
-    let RunOptions { clean, switch_version, wipe, server_pack } = options;
+    let RunOptions { clean, switch_version, wipe, server_pack, accept_eula } = options;
     // download and read the pack before anything on the server changes; the client pack
     // still says which Minecraft and loader the server pack needs
     let pack = load(ctx, version).await?;
@@ -876,6 +887,18 @@ async fn run(ctx: &Ctx, version: &Version, title: &str, options: RunOptions, job
     .await
     {
         tracing::warn!("modmanager: could not record the modpack: {e:?}");
+    }
+
+    // last, so a reinstall or a wipe above cannot remove it again
+    if accept_eula {
+        let eula = format!(
+            "#By changing the setting below to TRUE you are indicating your agreement to our EULA (https://aka.ms/MinecraftEULA).\n#{}\neula=true\n",
+            chrono::Utc::now().format("%a %b %d %H:%M:%S UTC %Y")
+        );
+        match ctx.files.write_bytes("eula.txt", eula.into_bytes()).await {
+            Ok(()) => step(ctx, &job, |j| j.switched.push("Accepted the Minecraft EULA (eula.txt)".into())).await,
+            Err(e) => step(ctx, &job, |j| j.warnings.push(format!("Could not write eula.txt: {e}"))).await,
+        }
     }
 
     let warnings = if switch_version { Vec::new() } else { mismatches(&pack, ctx.detected().await.loader.as_deref(), None) };

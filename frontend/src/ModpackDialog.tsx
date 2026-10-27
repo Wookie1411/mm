@@ -77,6 +77,7 @@ export default function ModpackDialog({
   const [clean, setClean] = useState(replacing);
   const [switchVersion, setSwitchVersion] = useState(false);
   const [wipe, setWipe] = useState(false);
+  const [acceptEula, setAcceptEula] = useState(true);
   const [useServerPack, setUseServerPack] = useState(true);
   const [starting, setStarting] = useState(false);
   const [reload, setReload] = useState(0);
@@ -118,6 +119,7 @@ export default function ModpackDialog({
         switch_version: switchVersion,
         wipe,
         server_pack: useServerPack,
+        accept_eula: acceptEula,
       });
       onStarted();
       onClose();
@@ -204,6 +206,20 @@ export default function ModpackDialog({
             ))}
           />
           <Section title='Left out: unsafe path or download host' items={plan.rejected} />
+
+          <Checkbox
+            label={
+              <>
+                Accept the{' '}
+                <Anchor href='https://aka.ms/MinecraftEULA' target='_blank' rel='noreferrer' size='sm'>
+                  Minecraft EULA
+                </Anchor>
+              </>
+            }
+            description='Writes eula.txt, so the server does not stop and ask for it on its first start.'
+            checked={acceptEula}
+            onChange={(e) => setAcceptEula(e.currentTarget.checked)}
+          />
 
           <Checkbox
             color='red'

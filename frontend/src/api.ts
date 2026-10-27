@@ -140,6 +140,8 @@ export interface ModpackRequest {
   switch_version?: boolean;
   wipe?: boolean;
   server_pack?: boolean;
+  /** Write eula.txt with eula=true after installing. */
+  accept_eula?: boolean;
 }
 
 export const modpackPlan = async (server: string, req: ModpackRequest): Promise<ModpackPlan> => {
