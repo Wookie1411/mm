@@ -186,6 +186,8 @@ export interface ModpackPlan {
   overrides: number;
   override_bytes: number;
   existing_mods: number;
+  /** The user may reinstall the server and delete its files. */
+  can_wipe?: boolean;
 }
 
 export interface ModpackJob {

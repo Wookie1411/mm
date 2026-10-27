@@ -29,6 +29,8 @@ interface Props {
   title: string;
   /** Replacing the pack this server already runs: clean the mods folder by default. */
   replacing: boolean;
+  /** Updating or reinstalling the pack the server already runs: never wipe by default (it would delete the world). */
+  sameProject?: boolean;
   onClose: () => void;
   onStarted: () => void;
 }
@@ -68,6 +70,7 @@ export default function ModpackDialog({
   versionId,
   title,
   replacing,
+  sameProject = false,
   onClose,
   onStarted,
 }: Props) {
@@ -104,6 +107,8 @@ export default function ModpackDialog({
         setPlan(p);
         if (p.warnings.length > 0 && p.switch_version.supported) setSwitchVersion(true);
         if (p.existing_mods > 0 && replacing) setClean(true);
+        // a different modpack starts best from an empty server; an update of the same one keeps its world
+        setWipe(!!p.can_wipe && !sameProject);
       })
       .catch((e) => setError(httpErrorToHuman(e)));
   }, [server, provider, projectId, versionId, reload]);
@@ -224,7 +229,12 @@ export default function ModpackDialog({
           <Checkbox
             color='red'
             label='Delete all server files first'
-            description='Reinstalls the server and deletes everything on it (worlds, configs, mods) before the pack is installed. Make a backup first.'
+            description={
+              plan.can_wipe
+                ? 'Reinstalls the server and deletes everything on it (worlds, configs, mods) before the pack is installed. Recommended for a new modpack; untick it to keep your world. Make a backup first.'
+                : 'Needs the "Reinstall" and "Delete files" permissions on this server.'
+            }
+            disabled={!plan.can_wipe}
             checked={wipe}
             onChange={(e) => setWipe(e.currentTarget.checked)}
           />

@@ -510,6 +510,8 @@ pub async fn plan(
         "overrides": pack.overrides.len(),
         "override_bytes": pack.overrides.values().map(|o| o.size).sum::<u64>(),
         "existing_mods": existing,
+        // "Reinstall" and "Delete files": needed for "Delete all server files first"
+        "can_wipe": runtime::check_wipe_permissions(&permissions).is_ok(),
     }))
     .ok()
 }

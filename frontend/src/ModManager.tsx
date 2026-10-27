@@ -433,6 +433,7 @@ export default function ModManager() {
           versionId={packDialog.versionId}
           title={packDialog.title}
           replacing={!!modpack}
+          sameProject={modpack?.provider === packDialog.provider && modpack?.project_id === packDialog.projectId}
           onClose={() => setPackDialog(null)}
           onStarted={() => {
             setView('installed');
