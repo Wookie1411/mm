@@ -16,6 +16,7 @@ mod admin;
 mod crash;
 mod ctx;
 mod detect;
+mod eggs;
 mod files;
 mod installed;
 mod modlist;

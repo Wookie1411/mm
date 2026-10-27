@@ -258,3 +258,30 @@ export const installUpdate = async (): Promise<{ installed: string; build_id: nu
   const { data } = await http.post(`${adminBase}/update`, {}, { timeout: 300_000 });
   return data;
 };
+
+export interface EggStatus {
+  installed: {
+    uuid: string;
+    name: string;
+    nest: string;
+    nest_name: string;
+    revision: number;
+    outdated: boolean;
+  } | null;
+  revision: number;
+  nests: { uuid: string; name: string; minecraft_eggs: number }[];
+}
+
+export const getAnyLoaderEgg = async (): Promise<EggStatus> => {
+  const { data } = await http.get(`${adminBase}/egg`);
+  return data;
+};
+
+export const addAnyLoaderEgg = async (nest: string): Promise<void> => {
+  await http.post(`${adminBase}/egg`, { nest });
+};
+
+export const downloadAnyLoaderEgg = async (): Promise<Blob> => {
+  const { data } = await http.get(`${adminBase}/egg/download`, { responseType: 'blob' });
+  return data;
+};

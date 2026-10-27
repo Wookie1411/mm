@@ -88,6 +88,11 @@ pub async fn route(ctx: &Ctx, pack: &Pack) -> Result<Route, Blocked> {
     }
     let loader = pack.loader.as_deref();
     let current = &ctx.server.egg;
+    let any_loader_ok = loader.is_none_or(|l| crate::eggs::LOADERS.contains(&l));
+    // the any-loader egg sets up every loader itself: set its variables and reinstall
+    if any_loader_ok && crate::eggs::is_any_loader(&ctx.state.database, current.uuid).await {
+        return Ok(Route::Egg { uuid: current.uuid, name: current.name.to_string() });
+    }
     if egg_matches(&current.name, loader) {
         return Ok(match loader {
             None | Some("fabric") => Route::Jar,
@@ -108,16 +113,26 @@ pub async fn route(ctx: &Ctx, pack: &Pack) -> Result<Route, Blocked> {
         Some("quilt") => "Quilt",
         Some(other) => other,
     };
-    // any egg on the panel that sets this loader up; the Mods page's egg list only decides
-    // where the page shows (the egg is added to it when the server moves). Prefer eggs on
-    // that list, then eggs in the same nest as the current one.
-    let Some((uuid, name, _)) = eggs
-        .into_iter()
-        .filter(|(_, n, _)| egg_matches(n, loader))
-        .min_by_key(|(u, _, nest)| (!ctx.settings.eggs.contains(u), *nest != ctx.server.nest.uuid))
-    else {
+    // the any-loader egg first (it handles every loader), else any egg on the panel that sets
+    // this loader up; the Mods page's egg list only decides where the page shows (the egg is
+    // added to it when the server moves). Prefer eggs on that list, then the same nest.
+    let any_loader = match any_loader_ok {
+        true => crate::eggs::find(&ctx.state.database).await,
+        false => None,
+    };
+    let chosen = match any_loader {
+        Some((uuid, _)) => eggs.iter().find(|(u, _, _)| *u == uuid).cloned(),
+        None => None,
+    }
+    .or_else(|| {
+        eggs.into_iter()
+            .filter(|(_, n, _)| egg_matches(n, loader))
+            .min_by_key(|(u, _, nest)| (!ctx.settings.eggs.contains(u), *nest != ctx.server.nest.uuid))
+    });
+    let Some((uuid, name, _)) = chosen else {
         return Err(Blocked::Other(format!(
-            "This panel has no {label} egg. A panel administrator can import one (Admin > Nests), then try again."
+            "This panel has no {label} egg. A panel administrator can add Mod Manager's \"{}\" egg with one click under Admin > Extensions > Mod Manager, then try again.",
+            crate::eggs::NAME
         )));
     };
     if !ctx.settings.switch_eggs {
@@ -334,6 +349,12 @@ fn egg_variables(minecraft: &str, loader: Option<&str>, version: Option<&str>) -
         Some(_) => out.push((&LOADER_VARIABLES, version.unwrap_or("latest").to_string())),
         None => {}
     }
+    // the any-loader egg: which loader, and its version in LOADER_VERSION for every loader
+    // (variables an egg does not have are skipped)
+    out.push((&["MINECRAFT_LOADER"], loader.unwrap_or("vanilla").to_string()));
+    if matches!(loader, Some("forge" | "neoforge")) || loader.is_none() {
+        out.push((&["LOADER_VERSION"], version.unwrap_or("latest").to_string()));
+    }
     out
 }
 
@@ -501,6 +522,17 @@ mod tests {
         assert_eq!(egg_variables("1.20.1", Some("neoforge"), Some("47.1.106"))[1].1, "1.20.1-47.1.106");
         assert_eq!(egg_variables("1.21.1", Some("neoforge"), Some("21.1.77"))[1].1, "21.1.77");
         assert_eq!(egg_variables("1.21.1", Some("neoforge"), None)[1].1, "");
-        assert_eq!(egg_variables("26.3", None, None).len(), 1);
+        // vanilla: the Minecraft version, plus the any-loader egg's loader variables
+        let v = egg_variables("26.3", None, None);
+        assert_eq!(v[0].1, "26.3");
+        assert!(v.contains(&(&["MINECRAFT_LOADER"][..], "vanilla".to_string())));
+        assert!(v.contains(&(&["LOADER_VERSION"][..], "latest".to_string())));
+        // the any-loader egg gets the loader and its version for Forge / NeoForge too
+        let v = egg_variables("1.20.1", Some("forge"), Some("47.2.0"));
+        assert!(v.contains(&(&["MINECRAFT_LOADER"][..], "forge".to_string())));
+        assert!(v.contains(&(&["LOADER_VERSION"][..], "47.2.0".to_string())));
+        let v = egg_variables("1.20.1", Some("fabric"), Some("0.16.5"));
+        assert!(v.contains(&(&["MINECRAFT_LOADER"][..], "fabric".to_string())));
+        assert!(v.contains(&(&LOADER_VARIABLES[..], "0.16.5".to_string())));
     }
 }

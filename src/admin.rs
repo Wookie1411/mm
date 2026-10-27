@@ -176,6 +176,8 @@ pub fn router(state: &State) -> OpenApiRouter<State> {
     OpenApiRouter::new()
         .route("/settings", get(read).put(update))
         .route("/update", get(crate::update::check).post(crate::update::install))
+        .route("/egg", get(crate::eggs::status).post(crate::eggs::add))
+        .route("/egg/download", get(crate::eggs::download))
         .route("/users", get(users))
         .route("/eggs", get(eggs))
         .route("/test-curseforge", post(test_curseforge))

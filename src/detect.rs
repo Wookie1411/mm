@@ -144,7 +144,9 @@ pub async fn detect(ctx: &Ctx) -> Detected {
     } else {
         None
     };
-    let from_vars = variables.iter().find_map(|(k, _)| match k.as_str() {
+    let from_vars = variables.iter().find_map(|(k, v)| match k.as_str() {
+        // the any-loader egg says it outright
+        "MINECRAFT_LOADER" => crate::providers::loader(v.trim()).ok().filter(|l| *l != crate::providers::DATAPACK),
         "NEOFORGE_VERSION" => Some("neoforge"),
         "FORGE_VERSION" => Some("forge"),
         "FABRIC_VERSION" | "FABRIC_LOADER_VERSION" => Some("fabric"),

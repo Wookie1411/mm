@@ -13,6 +13,7 @@ import {
   testCurseforgeKey,
   updateAdminSettings,
 } from './api';
+import EggSection from './EggSection';
 import UpdateSection from './UpdateSection';
 
 // Java servers (Vanilla too, for data packs); not Bedrock
@@ -202,6 +203,7 @@ export default function AdminSettings() {
           Save
         </Button>
       </Group>
+      <EggSection />
       <UpdateSection />
     </Stack>
   );
