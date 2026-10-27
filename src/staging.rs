@@ -51,12 +51,38 @@ pub async fn stage(ctx: &Ctx, dir: &str, url: &str, sha1: Option<&str>) -> Resul
         }
         ctx.files.decompress(dir, ARCHIVE).await?;
         ctx.files.delete(dir, &[ARCHIVE.to_string()]).await?;
+        // some authors wrap the real pack in another zip (with a readme next to it)
+        for _ in 0..2 {
+            let Some(inner) = wrapped_archive(&ctx.files.walk(dir).await?) else { break };
+            let (parent, name) = match inner.rsplit_once('/') {
+                Some((parent, name)) => (format!("{dir}/{parent}"), name.to_string()),
+                None => (dir.to_string(), inner.clone()),
+            };
+            ctx.files.decompress(&parent, &name).await?;
+            ctx.files.delete(&parent, &[name]).await?;
+        }
         // last, so a half-unpacked folder is never reused
         ctx.files.write_bytes(&marker_path, marker.into_bytes()).await?;
     }
     let mut files = ctx.files.walk(dir).await?;
     files.retain(|(path, _)| path != MARKER);
     Ok(files)
+}
+
+/// Files that can sit next to a wrapped pack.
+const NOTE_FILES: [&str; 4] = [".txt", ".md", ".url", ".html"];
+
+/// The one zip an unpacked archive holds when that zip is the actual pack: no other
+/// files but a few notes (a readme, a link). The marker file is ignored.
+fn wrapped_archive(files: &[(String, u64)]) -> Option<String> {
+    let files: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).filter(|p| *p != MARKER).collect();
+    let mut zips = files.iter().filter(|p| p.to_lowercase().ends_with(".zip"));
+    let zip = zips.next()?;
+    if zips.next().is_some() || files.len() > 6 {
+        return None;
+    }
+    let notes = files.iter().filter(|p| *p != zip).all(|p| NOTE_FILES.iter().any(|e| p.to_lowercase().ends_with(e)));
+    notes.then(|| zip.to_string())
 }
 
 /// The pack's index file, if the unpacked folder has it.
@@ -103,5 +129,20 @@ mod tests {
         assert!(is_staging(".modmanager-serverpack/x"));
         assert!(!is_staging(".modmanager-packs/x"));
         assert!(!is_staging("config/.modmanager-pack"));
+    }
+
+    fn files(n: &[&str]) -> Vec<(String, u64)> {
+        n.iter().map(|s| (s.to_string(), 1)).collect()
+    }
+
+    #[test]
+    fn wrapped_zip() {
+        let w = |n: &[&str]| wrapped_archive(&files(n));
+        assert_eq!(w(&["readme.txt", "Pack_server_pack.zip"]).as_deref(), Some("Pack_server_pack.zip"));
+        assert_eq!(w(&["Pack/Server.ZIP", MARKER]).as_deref(), Some("Pack/Server.ZIP"));
+        assert_eq!(w(&["mods/a.jar", "server.zip"]), None);
+        assert_eq!(w(&["a.zip", "b.zip"]), None);
+        assert_eq!(w(&["readme.txt"]), None);
+        assert_eq!(w(&["config/x.txt", "start.sh", "pack.zip"]), None);
     }
 }
