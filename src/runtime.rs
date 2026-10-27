@@ -66,10 +66,25 @@ fn egg_matches(name: &str, loader: Option<&str>) -> bool {
     }
 }
 
+/// Why the server cannot be switched to what the pack needs.
+pub enum Blocked {
+    /// Moving between eggs is not allowed yet; a panel administrator can allow it.
+    NotAllowed(String),
+    Other(String),
+}
+
+impl Blocked {
+    pub fn reason(&self) -> &str {
+        match self {
+            Blocked::NotAllowed(r) | Blocked::Other(r) => r,
+        }
+    }
+}
+
 /// How the server can be switched to what the pack needs; the reason when it cannot.
-pub async fn route(ctx: &Ctx, pack: &Pack) -> Result<Route, String> {
+pub async fn route(ctx: &Ctx, pack: &Pack) -> Result<Route, Blocked> {
     if pack.minecraft.is_none() {
-        return Err("The pack does not say which Minecraft version it needs.".into());
+        return Err(Blocked::Other("The pack does not say which Minecraft version it needs.".into()));
     }
     let loader = pack.loader.as_deref();
     let current = &ctx.server.egg;
@@ -80,10 +95,11 @@ pub async fn route(ctx: &Ctx, pack: &Pack) -> Result<Route, String> {
         });
     }
 
-    let eggs: Vec<(uuid::Uuid, String)> = sqlx::query_as("SELECT uuid, name FROM nest_eggs ORDER BY name")
-        .fetch_all(ctx.state.database.read())
-        .await
-        .unwrap_or_default();
+    let eggs: Vec<(uuid::Uuid, String, uuid::Uuid)> =
+        sqlx::query_as("SELECT uuid, name, nest_uuid FROM nest_eggs ORDER BY name")
+            .fetch_all(ctx.state.database.read())
+            .await
+            .unwrap_or_default();
     let label = match loader {
         None => "Vanilla Minecraft",
         Some("neoforge") => "NeoForge",
@@ -92,17 +108,44 @@ pub async fn route(ctx: &Ctx, pack: &Pack) -> Result<Route, String> {
         Some("quilt") => "Quilt",
         Some(other) => other,
     };
-    let Some((uuid, name)) = eggs.into_iter().find(|(u, n)| ctx.settings.egg_allowed(*u) && egg_matches(n, loader)) else {
-        return Err(format!(
-            "No {label} egg is enabled for Mod Manager. An administrator can enable one under Admin > Extensions > Mod Manager."
-        ));
+    // any egg on the panel that sets this loader up; the Mods page's egg list only decides
+    // where the page shows (the egg is added to it when the server moves). Prefer eggs on
+    // that list, then eggs in the same nest as the current one.
+    let Some((uuid, name, _)) = eggs
+        .into_iter()
+        .filter(|(_, n, _)| egg_matches(n, loader))
+        .min_by_key(|(u, _, nest)| (!ctx.settings.eggs.contains(u), *nest != ctx.server.nest.uuid))
+    else {
+        return Err(Blocked::Other(format!(
+            "This panel has no {label} egg. A panel administrator can import one (Admin > Nests), then try again."
+        )));
     };
     if !ctx.settings.switch_eggs {
-        return Err(format!(
-            "This server would have to move to the {name} egg. An administrator can allow that under Admin > Extensions > Mod Manager."
-        ));
+        return Err(Blocked::NotAllowed(format!(
+            "This server would have to move to the {name} egg, which this panel does not allow yet."
+        )));
     }
     Ok(Route::Egg { uuid, name })
+}
+
+/// After a move, add the new egg to Mod Manager's egg list so the Mods page stays on the server.
+async fn keep_page_visible(ctx: &Ctx, egg: uuid::Uuid) {
+    if ctx.settings.egg_allowed(egg) {
+        return;
+    }
+    let result = async {
+        let mut settings = ctx.state.settings.get_mut().await?;
+        let ext: &mut crate::settings::ExtensionSettingsData = settings.find_mut_extension_settings()?;
+        if !ext.eggs.is_empty() && !ext.eggs.contains(&egg) {
+            ext.eggs.push(egg);
+        }
+        settings.save().await?;
+        Ok::<_, anyhow::Error>(())
+    }
+    .await;
+    if let Err(e) = result {
+        tracing::warn!("modmanager: could not add egg {egg} to the egg list: {e:?}");
+    }
 }
 
 /// Wiping reinstalls the server with the panel's truncate flag: Reinstall plus Delete files.
@@ -343,6 +386,7 @@ async fn apply_egg(
             )
             .await?;
         changes.insert(0, format!("Moved the server from the {} egg to {egg_name}", ctx.server.egg.name));
+        keep_page_visible(ctx, egg_uuid).await;
     } else if image.is_some() {
         server.update(&ctx.state, UpdateServerOptions { image, ..Default::default() }).await?;
     }

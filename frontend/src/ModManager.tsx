@@ -58,6 +58,25 @@ const modpackAsInstalled = (m: CurrentModpack): Installed => ({
   update: m.update,
 });
 
+const uiKey = (server: string) => `modmanager:ui:${server}`;
+
+/** The content type and tab last open on a server (session storage; empty when unavailable). */
+const loadUi = (server: string): { kind?: ContentKind; view?: View } => {
+  try {
+    return JSON.parse(sessionStorage.getItem(uiKey(server)) ?? '{}');
+  } catch {
+    return {};
+  }
+};
+
+const saveUi = (server: string, ui: { kind: ContentKind; view: View }) => {
+  try {
+    sessionStorage.setItem(uiKey(server), JSON.stringify(ui));
+  } catch {
+    // private window or storage blocked: the page just starts on its default tab
+  }
+};
+
 export default function ModManager() {
   const server = useServerStore((state) => state.server.uuid);
   const { addToast } = useToast();
@@ -94,15 +113,23 @@ export default function ModManager() {
         setSettings(s);
         if (s.providers.length > 0) setProvider(s.providers[0]);
         if (s.egg_allowed && !s.restricted && s.can_view) {
-          return api.getContext(server).then((c) => {
+          return Promise.all([api.getContext(server), api.modpackJob(server).catch(() => null)]).then(([c, job]) => {
             setContext(c);
             const loader = c.detected.loader;
+            // a reinstall during a modpack install reloads this page: go straight back to its progress
+            const installing = job?.state === 'running' && Date.now() / 1000 - job.started < 3600;
+            const saved = loadUi(server);
+            const kind: ContentKind = installing
+              ? 'modpack'
+              : (saved.kind ??
+                // no loader and no mods / plugins folder (e.g. Vanilla): only data packs make sense
+                (!loader && !c.detected.directory ? 'datapack' : isPluginLoader(loader) ? 'plugins' : 'mods'));
             setTarget({
-              // no loader and no mods / plugins folder (e.g. Vanilla): only data packs make sense
-              kind: !loader && !c.detected.directory ? 'datapack' : isPluginLoader(loader) ? 'plugins' : 'mods',
-              loader: loader ?? 'any',
+              kind,
+              loader: loaderFor(kind, loader ?? 'any', loader),
               game_version: c.detected.game_version ?? 'any',
             });
+            setView(installing ? 'installed' : (saved.view ?? 'browse'));
           });
         }
       })
@@ -110,6 +137,11 @@ export default function ModManager() {
   }, [server]);
 
   const isModpack = target?.kind === 'modpack';
+
+  // remember the tab per server for this browser session
+  useEffect(() => {
+    if (target) saveUi(server, { kind: target.kind, view });
+  }, [server, target?.kind, view]);
 
   const loadInstalled = useCallback(
     (fresh = false) => {

@@ -3,6 +3,7 @@ export type ProviderId = 'modrinth' | 'curseforge';
 export interface Settings {
   access: string;
   restricted: boolean;
+  is_admin?: boolean;
   egg_allowed: boolean;
   can_view: boolean;
   can_manage: boolean;
@@ -174,6 +175,8 @@ export interface ModpackPlan {
     supported: boolean;
     reason: string | null;
     how: { route: 'jar' } | { route: 'egg'; egg: string; moves: boolean } | null;
+    /** Blocked only because the panel does not allow moving between eggs yet, and you are a panel admin. */
+    admin_can_allow?: boolean;
   };
   downloads: { path: string; title: string | null; size: number }[];
   download_bytes: number;
@@ -200,6 +203,11 @@ export interface ModpackJob {
   skipped: string[];
   warnings: string[];
   switched?: string[];
+  /** download / server / mods / files / check / done */
+  phase?: string;
+  /** The steps this install goes through, in order. */
+  phases?: string[];
+  server_pack?: boolean;
   started: number;
   finished: number | null;
 }

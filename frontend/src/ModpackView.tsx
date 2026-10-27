@@ -1,10 +1,11 @@
 import { faArrowUp, faCodeBranch, faRotateRight, faSyncAlt, faXmark } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { Alert, Anchor, Badge, Button, Group, List, Loader, Modal, Paper, Progress, Stack, Text } from '@mantine/core';
+import { Alert, Badge, Button, Group, Loader, Modal, Paper, Stack, Text } from '@mantine/core';
 import { useCallback, useEffect, useState } from 'react';
 import { httpErrorToHuman } from '@/api/axios.ts';
 import { useToast } from '@/providers/ToastProvider.tsx';
 import * as api from './api';
+import JobProgress from './JobProgress';
 import ProjectIcon from './ProjectIcon';
 import { CurrentModpack, ModpackJob, ProviderId, Settings, Target } from './types';
 import { formatDate, PROVIDER_LABELS } from './util';
@@ -108,90 +109,7 @@ export default function ModpackView({
 
       {error && <Alert color='red'>{error}</Alert>}
 
-      {job && (
-        <Paper withBorder radius='md' p='md'>
-          <Group justify='space-between' mb='xs'>
-            <Text fw={500}>
-              {job.title} {job.version}
-            </Text>
-            <Badge
-              color={
-                job.state === 'done'
-                  ? job.failed.length
-                    ? 'yellow'
-                    : 'green'
-                  : job.state === 'failed'
-                    ? 'red'
-                    : 'blue'
-              }
-            >
-              {job.state === 'running'
-                ? 'installing'
-                : job.state === 'done'
-                  ? job.failed.length
-                    ? 'done with errors'
-                    : 'installed'
-                  : 'failed'}
-            </Badge>
-          </Group>
-          {running && (
-            <>
-              <Progress value={job.total ? (job.done / job.total) * 100 : 5} animated mb={4} />
-              <Text size='xs' c='dimmed'>
-                {job.step} · {job.done} of {job.total || '?'}
-              </Text>
-            </>
-          )}
-          {job.state !== 'running' && (
-            <Text size='sm' c={job.state === 'failed' ? 'red' : undefined}>
-              {job.state === 'failed'
-                ? job.step
-                : `${job.installed} files downloaded, ${job.written} override files written${job.removed ? `, ${job.removed} old mods removed` : ''}${job.finished ? ` · ${new Date(job.finished * 1000).toLocaleString()}` : ''}. Restart the server to load it.`}
-            </Text>
-          )}
-          {job.failed.length > 0 && (
-            <Alert color='red' mt='sm' py='xs' title={`${job.failed.length} failed`}>
-              <List size='xs'>
-                {job.failed.slice(0, 50).map((f) => (
-                  <List.Item key={f}>{f}</List.Item>
-                ))}
-              </List>
-            </Alert>
-          )}
-          {job.manual.length > 0 && (
-            <Alert color='yellow' mt='sm' py='xs' title='Download these by hand and upload them in the Files tab'>
-              <List size='xs'>
-                {job.manual.map((m) => (
-                  <List.Item key={m.path}>
-                    {m.title ?? m.path}{' '}
-                    {m.page && (
-                      <Anchor href={m.page} target='_blank' rel='noreferrer' size='xs'>
-                        download
-                      </Anchor>
-                    )}{' '}
-                    → /{m.path}
-                  </List.Item>
-                ))}
-              </List>
-            </Alert>
-          )}
-          {(job.switched ?? []).map((s) => (
-            <Text key={s} size='xs' c='dimmed' mt={4}>
-              {s}
-            </Text>
-          ))}
-          {job.warnings.map((w) => (
-            <Text key={w} size='xs' c='yellow' mt={4}>
-              {w}
-            </Text>
-          ))}
-          {job.skipped.length > 0 && (
-            <Text size='xs' c='dimmed' mt='xs'>
-              Left out {job.skipped.length} client-only: {job.skipped.join(', ')}
-            </Text>
-          )}
-        </Paper>
-      )}
+      {job && <JobProgress job={job} />}
 
       <Paper withBorder radius='md' p='md'>
         {current === undefined ? (

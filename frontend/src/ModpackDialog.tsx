@@ -79,6 +79,22 @@ export default function ModpackDialog({
   const [wipe, setWipe] = useState(false);
   const [useServerPack, setUseServerPack] = useState(true);
   const [starting, setStarting] = useState(false);
+  const [reload, setReload] = useState(0);
+  const [allowing, setAllowing] = useState(false);
+
+  /** Panel admins: allow moving servers between eggs right here, then re-check. */
+  const allowSwitching = async () => {
+    setAllowing(true);
+    try {
+      await api.updateAdminSettings({ switch_eggs: true });
+      addToast('Mod Manager may now move servers to another egg for modpack installs.', 'success');
+      setReload((n) => n + 1);
+    } catch (e) {
+      addToast(httpErrorToHuman(e), 'error');
+    } finally {
+      setAllowing(false);
+    }
+  };
 
   useEffect(() => {
     api
@@ -89,7 +105,7 @@ export default function ModpackDialog({
         if (p.existing_mods > 0 && replacing) setClean(true);
       })
       .catch((e) => setError(httpErrorToHuman(e)));
-  }, [server, provider, projectId, versionId]);
+  }, [server, provider, projectId, versionId, reload]);
 
   const start = async () => {
     setStarting(true);
@@ -218,6 +234,17 @@ export default function ModpackDialog({
               checked={switchVersion && plan.switch_version.supported}
               onChange={(e) => setSwitchVersion(e.currentTarget.checked)}
             />
+          )}
+          {plan.requires.minecraft && !plan.switch_version.supported && plan.switch_version.admin_can_allow && (
+            <Group gap='xs' ml={32}>
+              <Button size='xs' variant='light' loading={allowing} onClick={allowSwitching}>
+                Allow it
+              </Button>
+              <Text size='xs' c='dimmed'>
+                You are a panel administrator: this turns on "Let modpack installs change the server type" for the whole
+                panel.
+              </Text>
+            </Group>
           )}
 
           <Text size='xs' c='dimmed'>

@@ -99,6 +99,7 @@ async fn settings(
     ok(json!({
         "access": s.access,
         "restricted": !s.allows(&user),
+        "is_admin": user.admin,
         "egg_allowed": s.egg_allowed(server.egg.uuid),
         "can_view": ctx::can_view(&permissions),
         "can_manage": ctx::can_manage(&permissions),

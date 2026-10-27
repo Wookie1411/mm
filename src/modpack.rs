@@ -489,8 +489,14 @@ pub async fn plan(
         "warnings": mismatches(&pack, detected.loader.as_deref(), detected.game_version.as_deref()),
         "server_pack": serverpack::find(&ctx, &version).await.ok().flatten(),
         "switch_version": match runtime::route(&ctx, &pack).await {
-            Ok(route) => json!({ "supported": true, "reason": null, "how": route.describe(&ctx) }),
-            Err(reason) => json!({ "supported": false, "reason": reason, "how": null }),
+            Ok(route) => json!({ "supported": true, "reason": null, "how": route.describe(&ctx), "admin_can_allow": false }),
+            Err(blocked) => json!({
+                "supported": false,
+                "reason": blocked.reason(),
+                "how": null,
+                // a panel administrator can allow moving between eggs right from the dialog
+                "admin_can_allow": matches!(blocked, runtime::Blocked::NotAllowed(_)) && user.admin,
+            }),
         },
         "downloads": pack.files.iter().map(|f| json!({ "path": f.path, "title": f.title, "size": f.size })).collect::<Vec<_>>(),
         "download_bytes": pack.files.iter().map(|f| f.size).sum::<u64>(),
@@ -525,6 +531,14 @@ pub struct Job {
     /// What switching the Minecraft version changed.
     #[serde(default)]
     pub switched: Vec<String>,
+    /// The step the install is in (download / server / mods / files / check / done), for the progress view.
+    #[serde(default)]
+    pub phase: String,
+    /// The steps this install goes through, in order.
+    #[serde(default)]
+    pub phases: Vec<String>,
+    #[serde(default)]
+    pub server_pack: bool,
     pub started: i64,
     pub finished: Option<i64>,
 }
@@ -573,6 +587,8 @@ pub async fn install(
         title: title.clone(),
         version: version.version_number.clone(),
         step: "Downloading the modpack".into(),
+        phase: "download".into(),
+        phases: vec!["download".into(), "mods".into(), "check".into()],
         started: chrono::Utc::now().timestamp(),
         ..Default::default()
     };
@@ -681,13 +697,33 @@ async fn run(ctx: &Ctx, version: &Version, title: &str, options: RunOptions, job
         false => None,
     };
     let route = match switch_version {
-        true => Some(runtime::route(ctx, &pack).await.map_err(display)?),
+        true => Some(runtime::route(ctx, &pack).await.map_err(|b| display(b.reason().to_string()))?),
         false => None,
     };
     let mut switched = Vec::new();
     if let Some(sp) = &server_pack {
         switched.push(format!("Using the server pack {}", sp.name));
     }
+    // the steps the progress view shows
+    let server_step = wipe || route.is_some();
+    let regular = server_pack.is_none();
+    step(ctx, &job, |j| {
+        j.phases = ["download", "server", "mods", "files", "check"]
+            .into_iter()
+            .filter(|p| match *p {
+                "server" => server_step,
+                "files" => regular && !pack.overrides.is_empty(),
+                "check" => regular,
+                _ => true,
+            })
+            .map(String::from)
+            .collect();
+        j.server_pack = !regular;
+        if server_step {
+            j.phase = "server".into();
+        }
+    })
+    .await;
     // the egg route wipes as part of its own reinstall
     if wipe && !matches!(route, Some(runtime::Route::Egg { .. })) {
         step(ctx, &job, |j| j.step = "Reinstalling the server and deleting all its files (can take a few minutes)".into())
@@ -719,6 +755,7 @@ async fn run(ctx: &Ctx, version: &Version, title: &str, options: RunOptions, job
         }
         j.switched = switched;
         j.step = "Preparing folders".into();
+        j.phase = "mods".into();
     })
     .await;
 
@@ -770,7 +807,11 @@ async fn run(ctx: &Ctx, version: &Version, title: &str, options: RunOptions, job
             .await;
 
         // configs and everything else from the overrides
-        step(ctx, &job, |j| j.step = format!("Moving {} override files into place", pack.overrides.len())).await;
+        step(ctx, &job, |j| {
+            j.step = format!("Moving {} override files into place", pack.overrides.len());
+            j.phase = "files".into();
+        })
+        .await;
         // unpacked on the node: moved into place there, nothing goes through the panel.
         // A reinstall above may have deleted the unpacked pack; this unpacks it again then.
         let total = pack.overrides.len();
@@ -791,7 +832,11 @@ async fn run(ctx: &Ctx, version: &Version, title: &str, options: RunOptions, job
         }
 
         // check what Wings downloaded, and remember where each jar came from
-        step(ctx, &job, |j| j.step = "Verifying downloads".into()).await;
+        step(ctx, &job, |j| {
+            j.step = "Verifying downloads".into();
+            j.phase = "check".into();
+        })
+        .await;
         let paths: Vec<String> = pack.files.iter().map(|f| f.path.clone()).collect();
         let hashes = ctx.files.fingerprints(&paths, Algorithm::Sha1).await;
         for f in &pack.files {
@@ -839,6 +884,7 @@ async fn run(ctx: &Ctx, version: &Version, title: &str, options: RunOptions, job
         j.warnings.extend(warnings);
         j.state = "done".into();
         j.step = "Done".into();
+        j.phase = "done".into();
         j.finished = Some(chrono::Utc::now().timestamp());
     })
     .await;
